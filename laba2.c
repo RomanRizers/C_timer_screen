@@ -1,213 +1,166 @@
 #include <avr/io.h>
 #include <util/delay.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include "Displey_laboratornaya_2_3.h"
 #include "tft.h"
-#include <stdio.h>
+#include "math.h"
 
-#define BUTTON_ONE 0b0001
-#define BUTTON_TWO 0b0010
-#define BUTTON_THREE 0b0100
-#define BUTTON_FOUR 0b1000
+// Определение кнопок
 
-struct Planet
-{
-    char x;
-    char y;
-    char radius;
-    char orbit_radius;
-    char angle;
-};
+#define BUTTON_TIMER_ON   0b00000001
+#define BUTTON_TIMER_OFF  0b00000010
+#define BUTTON_TIMER_NULL 0b00000100
 
-char detect_buttons_in_delay(int delay)
-{
+// Глобальные переменные
+
+static char minutes = 0;
+static char seconds = 0;
+static char prev_minute = 0;
+static char prev_second = 0;
+static int minutes_color = LIME;
+static int seconds_color = WHITE;
+static int background_color = BLACK;
+
+// Координаты центра и радиус часов
+
+static byte centerX = 64;
+static byte centerY = 60;
+static byte clockRadius = 45;
+
+// Функция определения нажатых кнопок
+
+char detect_buttons() {
     static char previous_port = 0xFF;
-    int quant_count = delay / 10;
-    for (int quant_number = 0; quant_number < quant_count; ++quant_number)
-    {
-        char current_port = PINB;
-        char buttons = ~current_port & previous_port; 
-        previous_port = current_port;
-        if (buttons)
-            return buttons;
+    char current_port = PINB;
+    char buttons = ~current_port & previous_port;
+    previous_port = current_port;
+    return buttons;
+}
+
+// Функция рисования циферблата часов
+
+void DrawClockFace() {
+    // 12 делений для каждой минуты
+    for (int i = 0; i < 12; ++i) { // 30 градусов для каждой минуты
+        double angle = i * 30 * M_PI / 180.0;
+        byte x1 = centerX + (clockRadius - 5) * cos(angle);
+        byte y1 = centerY - (clockRadius - 5) * sin(angle);
+        byte x2 = centerX + clockRadius * cos(angle);
+        byte y2 = centerY - clockRadius * sin(angle);
+        Line(x1, y1, x2, y2, LIME); // линии для каждой минуты
+    }
+}
+
+// Функция стирания предыдущего времени
+
+void erase_prev_time() {
+    double minutesAngle = (90 - (prev_minute % 12) * 30 - (prev_second / 60.0) * 30) * M_PI / 180.0;
+    byte minutesLength = clockRadius - 15;
+
+    double secondsAngle = (90 - prev_second * 6) * M_PI / 180.0;
+    byte secondsLength = clockRadius - 7;
+
+    Line(centerX, centerY, centerX + secondsLength * cos(secondsAngle), centerY - secondsLength * sin(secondsAngle), background_color);
+
+    Line(centerX, centerY, centerX + minutesLength * cos(minutesAngle), centerY - minutesLength * sin(minutesAngle), background_color);
+}
+
+// Функция рисования текущего времени
+
+void draw_time() {
+    double minutesAngle = (90 - (minutes % 12) * 30 - (seconds / 60.0) * 30) * M_PI / 180.0;
+    byte minutesLength = clockRadius - 15; // рассчитываем угол для минутной стрелки
+
+    double secondsAngle = (90 - seconds * 6) * M_PI / 180.0;
+    byte secondsLength = clockRadius - 7; // для секундной
+    // отрисовка стрелок
+    Line(centerX, centerY, centerX + secondsLength * cos(secondsAngle), centerY - secondsLength * sin(secondsAngle), seconds_color);
+
+    Line(centerX, centerY, centerX + minutesLength * cos(minutesAngle), centerY - minutesLength * sin(minutesAngle), minutes_color);
+
+    prev_minute = minutes;
+    prev_second = seconds;
+
+    write_time();
+}
+
+// Функция записи времени на экран
+
+void write_time() {
+    if (minutes < 10) {
+        GotoXY(11, 15);
+        WriteInt(0);
+        GotoXY(12, 15);
+    }
+    else {
+        GotoXY(11, 15);
+    }
+
+    WriteInt(minutes);
+    GotoXY(13,15);
+    WriteString(":", LIME);
+    GotoXY(5,15);
+    WriteString("Time: ", LIME);
+    if (seconds < 10) {
+        GotoXY(14, 15);
+        WriteInt(0);
+        GotoXY(15, 15);
+    }
+    else {
+        GotoXY(14, 15);
+    }
+
+    WriteInt(seconds);
+}
+
+// Функция таймера
+
+void timer_on() {
+    while (1) {
+        char buttons = detect_buttons();
+        if (buttons & BUTTON_TIMER_OFF) {
+            break;
+        }
+        erase_prev_time();
+        draw_time();
+        seconds++;
+        if (seconds == 60) {
+            seconds = 0;
+            minutes++;
+        }
+
+        _delay_ms(500);
+    }
+}
+
+// Функция рисования фона
+
+void DrawBackground() {
+    FillRect(0, 0, XSIZE, YSIZE, background_color);
+}
+
+
+void main() {
+    DDRB = 0x00;
+    PORTB = 0xFF;
+    DDRD = 0xFF;
+    PORTD = 0xFF;
+
+    InitTFT();
+    DrawBackground();
+    DrawClockFace();
+    draw_time();
+
+    while (1) {
+        char buttons = detect_buttons();
+        if (buttons & BUTTON_TIMER_ON) {
+            timer_on();
+        }
+        else if (buttons & BUTTON_TIMER_NULL) {
+            minutes = 0;
+            seconds = 0;
+            erase_prev_time();
+            draw_time();
+        }
+
         _delay_ms(10);
     }
-    return 0x00;
-}
-
-void UpdatePlanetPosition(struct Planet *planet)
-{
-    planet->angle += 1;
-    if (planet->angle >= 360)
-    {
-        planet->angle = 0;
-    }
-
-    planet->x = XSIZE / 2 + planet->orbit_radius * cos(planet->angle);
-    planet->y = YSIZE / 2 + planet->orbit_radius * sin(planet->angle);
-}
-
-void UpdatePlanetPositionObr(struct Planet *planet)
-{
-    planet->angle -= 1;
-    if (planet->angle <= -360)
-    {
-        planet->angle = 0;
-    }
-
-    planet->x = XSIZE / 2 + planet->orbit_radius * cos(planet->angle);
-    planet->y = YSIZE / 2 + planet->orbit_radius * sin(planet->angle);
-}
-
-void UpdatePlanetPosition1(struct Planet *planet)
-{
-    planet->angle += 10;
-    if (planet->angle >= 360)
-    {
-        planet->angle = 0;
-    }
-
-    planet->x = XSIZE / 2 + planet->orbit_radius * cos(planet->angle);
-    planet->y = YSIZE / 2 + planet->orbit_radius * sin(planet->angle);
-}
-
-void UpdateSunSize(struct Planet *sun)
-{
-    sun->radius += 10;
-
-    if (sun->radius >= 70)
-    {
-        sun->radius = 70;
-    }
-
- 
-}
-
-int main()
-{
-    DDRD = 0xFF;
-	DDRB = 0x00;
-	PORTB = 0xFF;
-	PORTD = 0xFF;
-	InitTFT();
-	char isPlaying = 0;
-
-	struct Planet planets[3] = {
-
-        {XSIZE / 2, YSIZE / 2, 3, 30, 0}, 
-		{XSIZE / 2, YSIZE / 2, 5, 40, 163},
-        {XSIZE / 2, YSIZE / 2, 7, 50, 45}};
-
-	struct Planet sun[1] = {
-
-        {XSIZE / 2, YSIZE / 2, 10, 0, 0}};
-
-while (1)
-{
-char buttons = detect_buttons_in_delay(500);
-if (buttons & BUTTON_ONE)
-    { 
-	isPlaying = 1;
-	while (isPlaying)
-    	{
-
-	    ClearScreen();
-
-        FillCircle(XSIZE / 2, YSIZE / 2, 10, YELLOW);
-		Circle(XSIZE / 2, YSIZE / 2, 30, WHITE);
-		Circle(XSIZE / 2, YSIZE / 2, 40, WHITE);
-       
-        UpdatePlanetPosition(&planets[0]);
-        FillCircle(planets[0].x, planets[0].y, planets[0].radius, WHITE); 
-
-        UpdatePlanetPosition1(&planets[1]);
-        FillCircle(planets[1].x, planets[1].y, planets[1].radius, RED);
-		
-		UpdatePlanetPosition(&planets[2]);
-        FillCircle(planets[2].x, planets[2].y, planets[2].radius, BLUE);  
-        _delay_ms(50); 
-
-		buttons = detect_buttons_in_delay(50);
-
-        if (buttons & BUTTON_TWO)
-                {
-                    isPlaying = 0; 
-                    
-                }
-
-		}
-
-	}
-if (buttons & BUTTON_THREE)
-    {
-	isPlaying = 1;
-	while (isPlaying)
-    	{
-
-	    ClearScreen();
-
-        FillCircle(XSIZE / 2, YSIZE / 2, 10, YELLOW);
-		Circle(XSIZE / 2, YSIZE / 2, 30, WHITE);
-		Circle(XSIZE / 2, YSIZE / 2, 40, WHITE);
-		//Circle(XSIZE / 2, YSIZE / 2, 50, WHITE);
-       
-        UpdatePlanetPositionObr(&planets[0]);
-        FillCircle(planets[0].x, planets[0].y, planets[0].radius, WHITE); 
-
-        UpdatePlanetPositionObr(&planets[1]);
-        FillCircle(planets[1].x, planets[1].y, planets[1].radius, RED);
-		
-		UpdatePlanetPositionObr(&planets[2]);
-        FillCircle(planets[2].x, planets[2].y, planets[2].radius, BLUE);  
-        _delay_ms(50); 
-
-		buttons = detect_buttons_in_delay(50);
-
-        if (buttons & BUTTON_TWO)
-                {
-                    isPlaying = 0; 
-                    
-                }
-	}
-}
-if (buttons & BUTTON_FOUR)
-    {
-	isPlaying = 1;
-	while (isPlaying)
-    	{
-
-	    ClearScreen();
-
-       
-		Circle(XSIZE / 2, YSIZE / 2, 30, WHITE);
-		Circle(XSIZE / 2, YSIZE / 2, 40, WHITE);
-		//Circle(XSIZE / 2, YSIZE / 2, 50, WHITE);
-       
-        UpdatePlanetPositionObr(&planets[0]);
-        FillCircle(planets[0].x, planets[0].y, planets[0].radius, WHITE); 
-
-        UpdatePlanetPositionObr(&planets[1]);
-        FillCircle(planets[1].x, planets[1].y, planets[1].radius, RED);
-		
-		UpdatePlanetPositionObr(&planets[2]);
-        FillCircle(planets[2].x, planets[2].y, planets[2].radius, BLUE);  
-
-		FillCircle(sun[0].x, sun[0].y, sun[0].radius, YELLOW);
-		UpdateSunSize(&sun[0]);
-        _delay_ms(50); 
-
-		buttons = detect_buttons_in_delay(50);
-
-        if (buttons & BUTTON_TWO)
-                {
-                    isPlaying = 0; 
-                    
-                }
-	}
-}
-
-}
-
-	return 0;
 }
